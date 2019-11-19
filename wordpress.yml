@@ -1,0 +1,93 @@
+---
+- name: Install wordpress
+  hosts: serverx
+  gather_facts: false
+  remote_user: root
+  vars:
+    ansible_password: redhat
+  tasks:
+    - name: Install package
+      yum:
+        name:
+          - httpd
+          - mariadb
+          - mariadb-server
+          - php
+          - php-common
+          - php-mysql
+          - php-gd
+          - php-xml
+          - php-mbstring
+          - php-mcrypt
+          - php-xmlrpc
+          - unzip
+          - wget
+        state: present
+    - name: Start httpd
+      service:
+        name: httpd
+        state: started
+        enabled: yes
+    - name: Start mariadb
+      service:
+        name: mariadb
+        state: started
+        enabled: yes
+    - name: start firewalld
+      firewalld:
+        service: http
+        permanent: yes
+        state: enabled
+        immediate: yes
+    - name: set database
+      command: echo {{ item }} | mysql -uroot -p"abc"
+      loop:
+        - "DELETE FROM mysql.user WHERE User='';"
+        - "DELETE FROM mysql.user WHERE User='root' AND Host NOT IN ('localhost',
+'127.0.0.1', '::1');"
+        - "DROP DATABASE test;"
+        - "DELETE FROM mysql.db WHERE Db='test' OR Db='test\_%';"
+        - "FLUSH PRIVILEGES;"
+        - "CREATE DATABASE wordpress"
+        - "GRANT ALL PRIVILEGES on wordpress.* to 'ansible'@'localhost' identified by
+'mypassword';"
+        - "FLUSH PRIVILEGES;"
+    - name: download file
+      get_url:
+        url: https://wordpress.org/wordpress-5.0.tar.gz
+        dest: /tmp
+    - name: extract file
+      unarchive:
+        src: /tmp/wordpress-5.0.tar.gz
+        dest: /var/www/html/
+        remote_src: yes
+    - name: change owner,group and mode
+      file:
+        path: /var/www/html/wordpress
+        owner: apache
+        group: apache
+        mode: 755
+    - name: create directory
+      file:
+        path: /var/www/html/wordpress/wp-content/uploads
+        state: directory
+    - name: change group on upload directory
+      file:
+        path: /var/www/html/wordpress/wp-content/uploads
+        group: apache
+    - name: move file
+      copy:
+        src: /var/www/html/wordpress/wp-config-sample.php
+        dest: /var/www/html/wordpress/wp-config.php
+        remote_src: yes
+    - name: edit
+      lineinfile:
+        dest: /var/www/html/wordpress/wp-config.php
+        regexp: "{{item.regexp}}"
+        line: "{{item.line}}"
+      with_items:
+        - {'regexp': "define\\('DB_NAME', '(.)+'\\);", 'line': "define('DB_NAME', 'wordpress');"}        
+        - {'regexp': "define\\('DB_USER', '(.)+'\\);", 'line': "define('DB_USER', 'ansible');"}        
+        - {'regexp': "define\\('DB_PASSWORD', '(.)+'\\);", 'line': "define('DB_PASSWORD', 'mypassword');"}
+        - {'regexp': "define\\('DB_HOST', '(.)+'\\);", 'line': "define('DB_HOST', 'localhost');"}
+      become: yes
